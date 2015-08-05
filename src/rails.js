@@ -33,7 +33,7 @@
     inputChangeSelector: 'select[data-remote], input[data-remote], textarea[data-remote]',
 
     // Form elements bound by jquery-ujs
-    formSubmitSelector: 'form',
+    formSubmitSelector: 'form, form[data-local]',
 
     // Form input elements bound by jquery-ujs
     formInputClickSelector: 'form input[type=submit], form input[type=image], form button[type=submit], form button:not([type]), input[type=submit][form], input[type=image][form], button[type=submit][form], button[form]:not([type])',
@@ -199,6 +199,97 @@
         // If there is an error parsing the URL, assume it is crossDomain.
         return true;
       }
+    },
+
+    // Checks "data-local" if true to handle the request through a XHR request.
+    isLocal: function(element) {
+      return element.data('local') !== undefined && element.data('local') !== false;
+    },
+
+    // Submits "Local" forms and links with ajax
+    handleLocal: function(element) {
+      var method, func, data, withCredentials, dataType, options;
+
+      if (rails.fire(element, 'local:before')) {
+        withCredentials = element.data('with-credentials') || null;
+        dataType = element.data('type') || ($.ajaxSettings && $.ajaxSettings.dataType);
+
+        if (element.is('form')) {
+          method = element.attr('method');
+          func = element.attr('action');
+          data = element.serializeArray();
+          // memoized value from clicked submit button
+          var button = element.data('ujs:submit-button');
+          if (button) {
+            data.push(button);
+            element.data('ujs:submit-button', null);
+          }
+        } else if (element.is(rails.inputChangeSelector)) {
+          method = element.data('method');
+          func = element.data('url');
+          data = element.serialize();
+          if (element.data('params')) data = data + '&' + element.data('params');
+        } else if (element.is(rails.buttonClickSelector)) {
+          method = element.data('method') || 'get';
+          func = element.data('url');
+          data = element.serialize();
+          if (element.data('params')) data = data + '&' + element.data('params');
+        } else {
+          method = element.data('method');
+          func = rails.href(element);
+          data = element.data('params') || null;
+        }
+
+        options = {
+          type: method || 'GET', data: data, dataType: dataType,
+          // stopping the "ajax:beforeSend" event will cancel the ajax request
+          beforeSend: function(xhr, settings) {
+            if (settings.dataType === undefined) {
+              xhr.setRequestHeader('accept', '*/*;q=0.5, ' + settings.accepts.script);
+            }
+            if (rails.fire(element, 'local:beforeSend', [xhr, settings])) {
+              element.trigger('local:send', xhr);
+            } else {
+              return false;
+            }
+          },
+          success: function(data, status, xhr) {
+            element.trigger('local:success', [data, status, xhr]);
+          },
+          complete: function(xhr, status) {
+            element.trigger('local:complete', [xhr, status]);
+          },
+          error: function(xhr, status, error) {
+            element.trigger('local:error', [xhr, status, error]);
+          },
+          crossDomain: rails.isCrossDomain(url)
+        };
+
+        // There is no withCredentials for IE6-8 when
+        // "Enable native XMLHTTP support" is disabled
+        if (withCredentials) {
+          options.xhrFields = {
+            withCredentials: withCredentials
+          };
+        }
+
+        // Only pass url to `ajax` options if not blank
+        if (url) { options.url = url; }
+
+        return rails.local(options);
+      } else {
+        return false;
+      }
+    },
+
+    // Default local function, may be overridden with custom function in $.rails.local
+    local: function(options) {
+      console.log(options);
+      var fn = window[options.func];
+      if(typeof fn === 'function') {
+        fn(t.parentNode.id);
+      }
+      return $.ajax(options);
     },
 
     // Handles "data-method" on links such as:
